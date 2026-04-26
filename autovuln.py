@@ -286,6 +286,91 @@ def check_headers(resp_headers, req_headers=None):
                 "on responses containing sensitive or dynamic data.",
                 "CWE-524"))
 
+
+    # Referrer-Policy
+    if "referrer-policy" not in h:
+        results.append(_found(
+            "Referrer-Policy Header Missing", SEVERITY_LOW,
+            "The Referrer-Policy header is absent. Browsers may send the full URL as a Referer "
+            "header to third parties, leaking sensitive path or query parameters.",
+            "Referrer-Policy header is absent in the response.",
+            "Add: Referrer-Policy: strict-origin-when-cross-origin or no-referrer.",
+            "CWE-116"))
+
+    # Permissions-Policy
+    if "permissions-policy" not in h and "feature-policy" not in h:
+        results.append(_found(
+            "Permissions-Policy Header Missing", SEVERITY_LOW,
+            "The Permissions-Policy (formerly Feature-Policy) header is not set. "
+            "This allows unrestricted browser feature access (camera, microphone, geolocation).",
+            "Permissions-Policy header is absent in the response.",
+            "Add: Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=()",
+            "CWE-16"))
+
+    # X-XSS-Protection explicitly disabled
+    xxss = h.get("x-xss-protection", "")
+    if xxss.strip() == "0":
+        results.append(_found(
+            "X-XSS-Protection Explicitly Disabled", SEVERITY_LOW,
+            "The X-XSS-Protection header is set to 0, explicitly disabling the browser's "
+            "built-in XSS auditor. While modern browsers rely on CSP, disabling this header "
+            "removes a defence-in-depth layer for older browsers.",
+            "X-XSS-Protection: 0",
+            "Remove the header entirely or set X-XSS-Protection: 1; mode=block.",
+            "CWE-79"))
+
+    # CORS: Access-Control-Allow-Credentials: true with wildcard or reflected origin
+    acac = h.get("access-control-allow-credentials", "").strip().lower()
+    if acac == "true":
+        if acao == "*":
+            results.append(_found(
+                "CORS Misconfiguration: Credentials with Wildcard Origin", SEVERITY_CRITICAL,
+                "Access-Control-Allow-Credentials is true while Access-Control-Allow-Origin is "
+                "wildcard (*). This combination is rejected by browsers but indicates a dangerous "
+                "intent and may work in non-browser clients.",
+                "Access-Control-Allow-Credentials: true with Access-Control-Allow-Origin: *",
+                "Never combine credentials=true with wildcard origin. Explicitly whitelist trusted origins.",
+                "CWE-942"))
+        elif acao and has_origin_request and acao == rh.get("origin", ""):
+            results.append(_found(
+                "CORS Reflected Origin with Credentials Allowed", SEVERITY_HIGH,
+                "The server reflects the request Origin header back in Access-Control-Allow-Origin "
+                "and also sets Access-Control-Allow-Credentials: true. This allows any origin to "
+                "make credentialed cross-origin requests and read the response.",
+                "ACAO: {} | ACAC: true | Request Origin: {}".format(acao, rh.get("origin", "")),
+                "Maintain an explicit server-side allowlist of trusted origins. Never reflect Origin dynamically.",
+                "CWE-942"))
+
+    # Open Redirect via Location header on 3xx
+    location = h.get("location", "")
+    if location and status_code and 300 <= status_code < 400:
+        if location.startswith("http") and has_origin_request:
+            # Only flag when redirecting to a different host than the request
+            import re as _re2
+            m_loc = _re2.match(r'https?://([^/]+)', location)
+            m_ref = _re2.match(r'https?://([^/]+)', rh.get("referer", "http://same"))
+            if m_loc and m_ref and m_loc.group(1).lower() != m_ref.group(1).lower():
+                results.append(_found(
+                    "Potential Open Redirect", SEVERITY_MEDIUM,
+                    "A redirect response points to an external domain. If the redirect target is "
+                    "derived from user-controlled input, this enables open redirect attacks "
+                    "for phishing and bypassing referrer checks.",
+                    "Location: {} | Status: {}".format(_trunc(location, 100), status_code),
+                    "Validate and whitelist redirect targets server-side. Never redirect to user-supplied URLs.",
+                    "CWE-601"))
+
+    # X-Runtime / X-Response-Time leaking server timing
+    for timing_hdr in ("x-runtime", "x-response-time", "x-request-id", "x-powered-by-plesk"):
+        if timing_hdr in h:
+            results.append(_found(
+                "Server Timing Information Disclosure", SEVERITY_LOW,
+                "The {} header exposes internal server timing or infrastructure details. "
+                "Timing data can aid enumeration and blind injection attacks.".format(timing_hdr),
+                "{}: {}".format(timing_hdr, _trunc(h[timing_hdr], 80)),
+                "Remove or suppress timing headers in production. Configure your framework/proxy to strip them.",
+                "CWE-200"))
+            break  # one finding per response is enough
+
     return results
 
 
@@ -369,6 +454,18 @@ def check_cookies(set_cookie_headers):
                 "Cookie contains JSON: " + _trunc(value),
                 "Replace JSON data in cookies with opaque server-side session identifiers.",
                 "CWE-312"))
+
+
+        # SameSite attribute check
+        if "samesite=strict" not in lower and "samesite=lax" not in lower:
+            results.append(_found(
+                "Cookie SameSite Attribute Missing or Weak", SEVERITY_LOW,
+                "A cookie is set without a SameSite attribute (or with SameSite=None), "
+                "making it vulnerable to Cross-Site Request Forgery (CSRF) attacks.",
+                "Set-Cookie: " + _trunc(cookie),
+                "Add SameSite=Strict or SameSite=Lax to all cookies. "
+                "Use SameSite=None only with Secure flag for legitimate cross-site cookies.",
+                "CWE-352"))
 
     return results
 
@@ -490,15 +587,6 @@ def check_body(body, content_type):
     if not body:
         return results
 
-    m = RE_EMAIL.search(body)
-    if m:
-        results.append(_found(
-            "Email Address Disclosed", SEVERITY_LOW,
-            "The response body contains email addresses, potentially enabling phishing and spam attacks.",
-            "Email found: " + m.group(),
-            "Remove email addresses from public pages or obfuscate them. Use contact forms instead.",
-            "CWE-200"))
-
     m = RE_INTERNAL_IP.search(body)
     if m:
         results.append(_found(
@@ -519,19 +607,69 @@ def check_body(body, content_type):
                 "Implement custom error pages (400, 403, 404, 500). Log errors server-side only.",
                 "CWE-209"))
 
+
+    # Directory listing
+    if re.search(r'<title>[Ii]ndex of /', body) or re.search(r'<h1>[Ii]ndex of /', body):
+        results.append(_found(
+            "Directory Listing Enabled", SEVERITY_HIGH,
+            "The web server is returning a directory listing, exposing all files and subdirectories "
+            "in this path to any visitor. This can reveal source code, config files, and backups.",
+            "Directory listing page detected (Index of / title/heading found).",
+            "Disable directory listing: Apache: Options -Indexes | Nginx: autoindex off. "
+            "Ensure no sensitive files are in web-accessible directories.",
+            "CWE-548"))
+
+    # GraphQL introspection enabled
+    if '"__schema"' in body and '"types"' in body and '"queryType"' in body:
+        results.append(_found(
+            "GraphQL Introspection Enabled", SEVERITY_MEDIUM,
+            "GraphQL introspection is enabled, allowing any client to enumerate the full API schema "
+            "including all types, queries, mutations, and field names. This aids targeted attacks.",
+            "GraphQL introspection response detected (__schema and types present in body).",
+            "Disable introspection in production. Use query depth/complexity limits and field-level authorization.",
+            "CWE-200"))
+
+    # Sensitive file paths / backup exposure
+    RE_SENSITIVE_PATH = re.compile(
+        r'(?:href|src|action|url)[=:\s]+'
+        r'(?:[^\s"\']*(?:\.bak|\.backup|\.sql|\.dump|\.tar\.gz|\.zip|\.old|'
+        r'web\.config\.bak|\.env\.bak|config\.php\.bak|database\.yml|application\.yml))',
+        re.IGNORECASE)
+    m = RE_SENSITIVE_PATH.search(body)
+    if m:
+        results.append(_found(
+            "Backup or Sensitive File Reference Detected", SEVERITY_HIGH,
+            "A reference to a backup or sensitive file was found in the response. "
+            "These files often contain credentials, source code, or database dumps.",
+            "Sensitive file reference: " + _trunc(m.group(), 120),
+            "Remove all backup and configuration files from web-accessible directories. "
+            "Audit your deployment pipeline to prevent accidental file exposure.",
+            "CWE-538"))
+
+    # Mixed content: HTTP resource on HTTPS page
+    if content_type and "html" in content_type.lower():
+        RE_MIXED = re.compile(r'(?:src|href|action)=["\']http://[^"\']+["\']', re.IGNORECASE)
+        m = RE_MIXED.search(body)
+        if m:
+            results.append(_found(
+                "Mixed Content Detected", SEVERITY_MEDIUM,
+                "The HTTPS page loads resources (scripts, stylesheets, images) over HTTP. "
+                "Mixed content exposes those resources to MITM interception and manipulation, "
+                "and modern browsers may block them entirely.",
+                "HTTP resource in HTTPS page: " + _trunc(m.group(), 120),
+                "Update all resource references to use HTTPS or protocol-relative URLs (//).",
+                "CWE-311"))
+
     return results
 
 
 # -- 5. HTML Analyzer -----------------------------------------------------------
 
 RE_PWD_FIELD    = re.compile(r'<input[^>]+type=[\'"]password[\'"][^>]*>', re.IGNORECASE)
-RE_CHARSET      = re.compile(r'<meta[^>]+charset', re.IGNORECASE)
 RE_INPUT        = re.compile(r'<input[^>]+type=[\'"](?:text|password|email|number|tel)[\'"][^>]*>', re.IGNORECASE)
-RE_REL_CSS      = re.compile(r'<link[^>]+href=[\'"](?!https?://|//)[^/][^\'"]*\.css[\'"]', re.IGNORECASE)
 RE_FILE_INPUT   = re.compile(r'<input[^>]+type=[\'"]file[\'"][^>]*>', re.IGNORECASE)
 # Tightened: Indian mobile (starts 6-9, 10 digits) or international E.164 with + prefix only
 # Word boundaries prevent matching arbitrary large integers or IDs
-RE_PHONE        = re.compile(r'(?<!\d)(?:\+91[\s\-]?[6-9]\d{9}|(?<!\d)[6-9]\d{9}(?!\d)|\+[1-9]\d{7,14})(?!\d)')
 
 def check_html(body, content_type):
     results = []
@@ -551,15 +689,6 @@ def check_html(body, content_type):
                 "CWE-522"))
             break
 
-    # Charset not specified
-    if not RE_CHARSET.search(body):
-        results.append(_found(
-            "HTML Does Not Specify Charset", SEVERITY_INFO,
-            "No character encoding is specified. Can lead to charset sniffing attacks in older browsers.",
-            "No <meta charset> tag found in HTML.",
-            "Add <meta charset=\"UTF-8\"> in the <head> section of all HTML pages.",
-            "CWE-116"))
-
     # Input without maxlength
     for m in RE_INPUT.finditer(body):
         field = m.group()
@@ -572,16 +701,6 @@ def check_html(body, content_type):
                 "Add maxlength attribute to all text input fields. Enforce limits server-side.",
                 "CWE-400"))
             break
-
-    # Path-relative CSS
-    if RE_REL_CSS.search(body):
-        results.append(_found(
-            "Path-Relative Stylesheet Import", SEVERITY_LOW,
-            "CSS stylesheets are imported using relative paths, which can be exploited "
-            "for cross-site content injection in certain browser configurations.",
-            "Relative CSS import detected in HTML.",
-            "Use absolute paths for stylesheet imports (e.g., href=\"/assets/style.css\").",
-            "CWE-693"))
 
     # File upload without size hints
     m = RE_FILE_INPUT.search(body)
@@ -597,16 +716,22 @@ def check_html(body, content_type):
                 "Validate file type, size, and content.",
                 "CWE-400"))
 
-    # Phone number disclosure
-    m = RE_PHONE.search(body)
-    if m:
-        results.append(_found(
-            "Phone Number Disclosure in View Page Source", SEVERITY_INFO,
-            "A phone number is visible in the page source. May expose internal contact details.",
-            "Phone number found: " + m.group(),
-            "Review whether phone numbers in page source are intentional. "
-            "Remove internal/admin contact numbers from client-facing responses.",
-            "CWE-200"))
+    # Missing Subresource Integrity (SRI) on external scripts/stylesheets
+    RE_EXT_SCRIPT = re.compile(
+        r'<(?:script|link)[^>]+(?:src|href)=["\']https?://(?!localhost)[^"\']+["\'][^>]*>',
+        re.IGNORECASE)
+    for m in RE_EXT_SCRIPT.finditer(body):
+        tag = m.group()
+        if "integrity=" not in tag.lower():
+            results.append(_found(
+                "Subresource Integrity (SRI) Missing on External Resource", SEVERITY_MEDIUM,
+                "An external script or stylesheet is loaded without a Subresource Integrity hash. "
+                "If the CDN or external host is compromised, malicious code can be injected.",
+                "External resource without SRI: " + _trunc(tag, 120),
+                "Add integrity and crossorigin attributes to all external script/link tags. "
+                "Generate SRI hashes at srihash.org.",
+                "CWE-353"))
+            break  # one finding per page
 
     return results
 
@@ -646,6 +771,35 @@ def check_request(req_headers):
                         "Remove PII from JWT payloads. Store only opaque identifiers. "
                         "Use JWE if sensitive data must be included.",
                         "CWE-312"))
+        except Exception:
+            pass
+
+
+    # JWT algorithm none / weak alg in request Authorization
+    m = RE_BEARER_JWT.search(auth) if auth else None
+    if m:
+        token = m.group(1)
+        try:
+            parts = token.split(".")
+            if len(parts) >= 1:
+                padding = (4 - len(parts[0]) % 4) % 4
+                header_b64 = parts[0] + ("=" * padding)
+                try:
+                    header_json = base64.urlsafe_b64decode(header_b64).decode("utf-8", errors="replace")
+                except Exception:
+                    header_json = ""
+                if '"alg"' in header_json:
+                    if '"none"' in header_json.lower() or '"NONE"' in header_json:
+                        results.append(_found(
+                            "JWT Algorithm Set to None", SEVERITY_CRITICAL,
+                            "The JWT Authorization token uses alg=none, meaning the signature is "
+                            "not verified. An attacker can forge arbitrary tokens by setting alg=none "
+                            "and removing the signature.",
+                            "JWT header alg=none detected in Authorization header.",
+                            "Reject JWTs with alg=none server-side. Enforce RS256 or ES256 algorithm explicitly.",
+                            "CWE-327"))
+                    elif any(weak in header_json for weak in ['"HS256"', '"HS384"', '"HS512"']):
+                        pass  # HS256 is acceptable if secret is strong -- already covered by jwt_secret check
         except Exception:
             pass
 
@@ -1019,6 +1173,123 @@ SECRET_PATTERNS = [
         "the secret allows forging arbitrary JWT tokens.",
         "Remove the JWT secret from all responses. Rotate immediately. Use RS256 "
         "(asymmetric) signing instead of HS256 where possible."
+    ),
+
+    # ---- AI / LLM API Keys --------------------------------------------------
+    (
+        "OpenAI API Key",
+        re.compile(r'sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "An OpenAI API key was found in the response. This enables unlimited LLM API "
+        "usage billed to the account holder and access to fine-tuned models and org data.",
+        "Revoke the key at platform.openai.com/api-keys. Rotate immediately and store in a secrets manager."
+    ),
+    (
+        "Anthropic API Key",
+        re.compile(r'sk-ant-api[0-9]{2}-[A-Za-z0-9\-_]{93}AA'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "An Anthropic API key was found in the response. This allows unlimited access "
+        "to Claude models billed to the account.",
+        "Revoke the key in the Anthropic console. Rotate immediately and store server-side only."
+    ),
+    (
+        "HuggingFace API Token",
+        re.compile(r'hf_[A-Za-z0-9]{34,100}'),
+        SEVERITY_HIGH,
+        "CWE-798",
+        "A HuggingFace API token was found. This may allow access to private models, "
+        "datasets, and the ability to push malicious model weights.",
+        "Revoke the token at huggingface.co/settings/tokens. Use read-only tokens scoped to minimum permissions."
+    ),
+
+    # ---- Payment Gateways (India) -------------------------------------------
+    (
+        "Razorpay API Key",
+        re.compile(r'rzp_(?:live|test)_[A-Za-z0-9]{14,64}'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "A Razorpay API key was found. This can be used to initiate payment orders, "
+        "access transaction data, and interact with Razorpay APIs.",
+        "Revoke the key in the Razorpay dashboard. Never expose API keys in client-facing responses."
+    ),
+    (
+        "Razorpay Secret Key",
+        re.compile(r'(?i)razorpay[_\-]?(?:key[_\-]?secret|secret)[^\n]{0,20}[=:\s]+["\']?([A-Za-z0-9]{20,128})["\']?'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "A Razorpay secret key was found. Combined with the API key, this enables full "
+        "programmatic access to your Razorpay account.",
+        "Rotate the secret immediately in the Razorpay dashboard. Store in environment variables only."
+    ),
+    (
+        "PayU Key or Salt",
+        re.compile(r'(?i)payu[_\-]?(?:key|salt)[^\n]{0,10}[=:\s]+["\']?([A-Za-z0-9]{20,128})["\']?'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "A PayU key or salt was found in the response. This enables fraudulent payment "
+        "processing and access to transaction data.",
+        "Rotate immediately in the PayU merchant dashboard. Never expose PayU credentials in responses."
+    ),
+
+    # ---- Atlassian / Project Management -------------------------------------
+    (
+        "Jira or Confluence API Token",
+        re.compile(r'(?i)(?:jira|confluence)[_\-]?(?:api[_\-]?token|token|key)[^\n]{0,20}[=:\s]+["\']?([A-Za-z0-9+/=]{24,256})["\']?'),
+        SEVERITY_HIGH,
+        "CWE-798",
+        "A Jira or Confluence API token was found. This may allow reading/writing issues, "
+        "pages, and accessing project data as the token owner.",
+        "Revoke the token in your Atlassian account settings. Use scoped service account tokens."
+    ),
+
+    # ---- Cloud / Infrastructure ---------------------------------------------
+    (
+        "Databricks Personal Access Token",
+        re.compile(r'dapi[A-Za-z0-9]{32}'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "A Databricks Personal Access Token (PAT) was found. This grants full API access "
+        "to Databricks workspaces, clusters, and data.",
+        "Revoke in Databricks workspace settings. Use service principals with scoped permissions."
+    ),
+    (
+        "Docker Registry Auth Token",
+        re.compile(r'"auth"\s*:\s*"([A-Za-z0-9+/=]{20,512})"'),
+        SEVERITY_HIGH,
+        "CWE-798",
+        "Docker registry credentials (base64-encoded auth) were found in the response. "
+        "This may allow pulling private images or pushing malicious ones.",
+        "Rotate the registry credentials. Remove .docker/config.json from responses and version control."
+    ),
+    (
+        "HashiCorp Vault Token",
+        re.compile(r'hvs\.[A-Za-z0-9]{24,256}'),
+        SEVERITY_CRITICAL,
+        "CWE-798",
+        "A HashiCorp Vault token was found. This may grant access to secrets, certificates, "
+        "and encryption keys stored in Vault.",
+        "Revoke the token using vault token revoke. Rotate and use short-lived tokens with minimal policies."
+    ),
+
+    # ---- CI/CD --------------------------------------------------------------
+    (
+        "CircleCI API Token",
+        re.compile(r'(?i)circle[_\-]?(?:ci[_\-]?)?(?:api[_\-]?)?token[^\n]{0,10}[=:\s]+["\']?([a-f0-9]{40})["\']?'),
+        SEVERITY_HIGH,
+        "CWE-798",
+        "A CircleCI API token was found. This allows triggering builds, accessing environment "
+        "variables, and reading pipeline data.",
+        "Revoke in CircleCI personal API tokens settings. Use project-level tokens with minimal scope."
+    ),
+    (
+        "Travis CI Token",
+        re.compile(r'(?i)travis[_\-]?(?:ci[_\-]?)?token[^\n]{0,10}[=:\s]+["\']?([A-Za-z0-9\-_]{22,128})["\']?'),
+        SEVERITY_HIGH,
+        "CWE-798",
+        "A Travis CI token was found. This may allow reading private build logs and environment variables.",
+        "Revoke in Travis CI account settings. Rotate all exposed environment variables in affected repos."
     ),
 ]
 
