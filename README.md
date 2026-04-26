@@ -3,7 +3,7 @@
 <!-- BANNER -->
 <img src="https://img.shields.io/badge/-%F0%9F%9B%A1%EF%B8%8F%20AutoVuln-0b0f1a?style=for-the-badge&logoColor=white" alt="AutoVuln" height="60"/>
 
-# AutoVuln — Passive Security Scanner
+# AutoVuln: Passive Security Scanner
 
 **A Burp Suite extension that silently watches every HTTP response and surfaces security vulnerabilities in real time.**
 
@@ -17,7 +17,7 @@
 
 > **AutoVuln passively inspects every in-scope HTTP request/response flowing through Burp Suite,  
 > automatically classifying vulnerabilities by severity, deduplicating across endpoints,  
-> and exporting professional reports — with zero active probing.**
+> and exporting professional reports, with zero active probing.**
 
 <br/>
 
@@ -27,22 +27,44 @@
 
 ## ⚡ Quick Install
 
+### Step 1: Install Jython (if not already configured)
+
+Burp Suite needs Jython to run Python extensions. Skip this step if you already have it set up.
+
+1. Download the **Jython Standalone JAR** from [jython.org/download](https://www.jython.org/download)  
+   (get the file named `jython-standalone-2.7.x.jar`)
+2. In Burp Suite, go to `Extensions → Options → Python Environment`
+3. Under **Python Environment**, click `Select file...`
+4. Choose the downloaded `.jar` file
+5. Click `OK` — Burp will confirm Jython is loaded
+
+### Step 2: Load AutoVuln
+
 ```
-1. Open Burp Suite
-2. Go to  Extensions → Add
-3. Set Extension Type → Python
-4. Select autovuln.py
-5. Click Next — AutoVuln tab appears instantly
+1. In Burp Suite, go to  Extensions → Add
+2. Set Extension Type    → Python
+3. Click Select file     → choose autovuln.py
+4. Click Next            → AutoVuln tab appears in the main tab bar
 ```
 
-> **Requirement:** Burp Suite (Community or Pro) with **Jython 2.7** configured under  
-> `Extensions → Options → Python Environment`
+### Step 3: Add your target to Burp scope
+
+> **AutoVuln only processes in-scope traffic.** It will not surface any findings until your target is added to Burp's scope.
+
+```
+1. Go to Target → Scope
+2. Click Add (under Include in scope)
+3. Enter your target URL or hostname  e.g. https://example.com
+4. Click OK
+```
+
+Once your target is in scope, AutoVuln will begin passively analysing every request that flows through Burp and findings will appear in the AutoVuln tab in real time.
 
 ---
 
 ## 🎯 What It Does
 
-AutoVuln registers as a passive `IHttpListener`. For every response that matches your **Burp scope**, it runs eight independent analysis modules and surfaces findings directly in its dark-themed UI tab — no manual scanning, no active requests, no noise from out-of-scope traffic.
+AutoVuln registers as a passive `IHttpListener`. For every response that matches your **Burp scope**, it runs eight independent analysis modules and surfaces findings directly in its dark-themed UI tab. No manual scanning, no active requests, no noise from out-of-scope traffic.
 
 ```
 Browser / Proxy Tool
@@ -72,7 +94,7 @@ Browser / Proxy Tool
 
 ## 🛡️ Detection Coverage
 
-### Module 1 — Security Headers
+### Module 1: Security Headers
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
@@ -87,7 +109,7 @@ Browser / Proxy Tool
 | Access Control Allow Origin Not Defined | Informational | CWE-942 |
 | Cacheable HTTP Response (HTML/JSON without `no-store`) | Low | CWE-524 |
 
-### Module 2 — Cookie Analyzer
+### Module 2: Cookie Analyzer
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
@@ -98,7 +120,7 @@ Browser / Proxy Tool
 | Data Exposure in Cookie (JWT in value) | Medium | CWE-312 |
 | Data Exposure in Cookie (serialized JSON in value) | Medium | CWE-312 |
 
-### Module 3 — Vulnerable Library Versions
+### Module 3: Vulnerable Library Versions
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
@@ -108,7 +130,7 @@ Browser / Proxy Tool
 | Outdated MySQL Version Disclosure | Medium | CWE-200 |
 | JavaScript Version Disclosure (versioned filenames) | Informational | CWE-200 |
 
-### Module 4 — Response Body Scanner
+### Module 4: Response Body Scanner
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
@@ -116,7 +138,7 @@ Browser / Proxy Tool
 | Internal IP Disclosure (RFC-1918 ranges) | Medium | CWE-200 |
 | Improper Error Handling (stack traces, SQL errors, exceptions) | Medium | CWE-209 |
 
-### Module 5 — HTML Analyzer
+### Module 5: HTML Analyzer
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
@@ -127,20 +149,20 @@ Browser / Proxy Tool
 | Uploaded File Size Limit Not Defined | Low | CWE-400 |
 | Phone Number Disclosure in View Page Source | Informational | CWE-200 |
 
-### Module 6 — Request Analyzer
+### Module 6: Request Analyzer
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
 | Sensitive Data in Authorization Bearer (PII in JWT payload) | High | CWE-312 |
 
-### Module 7 — HTTP Methods
+### Module 7: HTTP Methods
 
 | Finding | Severity | CWE |
 |---------|----------|-----|
 | OPTIONS Method Enabled | Low | CWE-16 |
 | Dangerous HTTP Methods Enabled (PUT / DELETE / TRACE / CONNECT) | Critical | CWE-650 |
 
-### Module 8 — Secrets Detector (30+ patterns)
+### Module 8: Secrets Detector (30+ patterns)
 
 <details>
 <summary><strong>Click to expand full secrets coverage</strong></summary>
@@ -206,11 +228,11 @@ Browser / Proxy Tool
 └──────┴────────────┴──────────────────────┴──────────────┴─────┴─────┘
 ```
 
-**Severity Cards** — Clickable cards filter the table instantly. Shows counts for Total, Critical, High, Medium, Low.
+**Severity Cards:** Clickable cards filter the table instantly. Shows counts for Total, Critical, High, Medium, Low.
 
-**Scan Status** — Live indicator in the header. Shows `● scanning` (green) or `● paused` (red) with a real-time finding counter.
+**Scan Status:** Live indicator in the header. Shows `● scanning` (green) or `● paused` (red) with a real-time finding counter.
 
-**Pause / Resume** — Instantly halts all passive scanning without unloading the extension. Useful during authenticated flows where you don't want noise.
+**Pause / Resume:** Instantly halts all passive scanning without unloading the extension. Useful during authenticated flows where you don't want noise.
 
 ### Finding Detail Panel
 
@@ -244,9 +266,9 @@ Click any row to expand the full detail panel inline:
 
 Right-click any table row for quick clipboard actions:
 
-- **Copy Endpoint URL** — clean path without query string
-- **Copy Full URL** — complete URL including query parameters
-- **Copy Evidence** — raw evidence text for pasting into reports
+- **Copy Endpoint URL:** clean path without query string
+- **Copy Full URL:** complete URL including query parameters
+- **Copy Evidence:** raw evidence text for pasting into reports
 
 ---
 
@@ -254,20 +276,18 @@ Right-click any table row for quick clipboard actions:
 
 AutoVuln deduplicates at two levels:
 
-**1. Finding-level dedup** — The same finding type on the same host is stored as **one row**, not N rows:
+**1. Finding-level dedup:** The same finding type on the same host is stored as **one row**, not N rows:
 
 ```
-❌ Old behaviour               ✅ AutoVuln behaviour
-──────────────────             ────────────────────────────────────
-#1  HSTS Missing  /login       #1  HSTS Missing   3 endpoints
-#2  HSTS Missing  /register
-#3  HSTS Missing  /admin
+✅ AutoVuln behaviour
+────────────────────────────────────
+#1  HSTS Missing   3 endpoints
 ```
 
-**2. Endpoint-level dedup** — Query parameters are stripped before comparing:  
+**2. Endpoint-level dedup:** Query parameters are stripped before comparing:  
 `/login?next=/dashboard` and `/login?ref=email` are treated as the same endpoint `/login`.
 
-**3. Merge on hit** — When a new endpoint triggers an existing finding, it's appended to `Affected Endpoints` automatically. The detail panel and both export formats reflect all affected paths.
+**3. Merge on hit:** When a new endpoint triggers an existing finding, it is appended to `Affected Endpoints` automatically. The detail panel and both export formats reflect all affected paths.
 
 ---
 
@@ -277,7 +297,7 @@ AutoVuln deduplicates at two levels:
 
 Columns: `#` · `Finding Name` · `Severity` · `CWE` · `Host` · `Endpoints Count` · `Affected Endpoints (endpoint | HTTP status)` · `Description` · `Evidence` · `Remediation`
 
-- Formula injection prevention — cells starting with `=`, `+`, `-`, `@` are prefixed with `'` to prevent execution in Excel/Google Sheets
+- Formula injection prevention: cells starting with `=`, `+`, `-`, `@` are prefixed with `'` to prevent execution in Excel/Google Sheets
 - Multi-endpoint findings list all affected paths semicolon-separated in a single cell
 
 ### DOCX Export
@@ -286,13 +306,13 @@ Columns: `#` · `Finding Name` · `Severity` · `CWE` · `Host` · `Endpoints Co
 - Executive summary table with counts per severity
 - Per-finding tables with: Severity · CWE · Host · Affected Endpoints · Description · Evidence · Remediation
 - Multi-endpoint findings show a numbered list in the Affected Endpoints row
-- No external dependencies — built with raw OOXML, opens in Word and LibreOffice
+- No external dependencies. Built with raw OOXML, opens in Word and LibreOffice
 
 ---
 
 ## 🔀 Send to Repeater
 
-When viewing any finding detail, click **▶ Send to Repeater** to instantly forward the original captured request into Burp's Repeater tab — pre-labelled with the finding name for easy tracking.
+When viewing any finding detail, click **▶ Send to Repeater** to instantly forward the original captured request into Burp's Repeater tab, pre-labelled with the finding name for easy tracking.
 
 ```
 Finding:  "Website is Vulnerable to Clickjacking"
@@ -361,23 +381,23 @@ autovuln.py
 
 | Level | Colour | Meaning |
 |-------|--------|---------|
-| 🔴 **Critical** | Red | Immediate exploitation risk — credentials, private keys, dangerous methods |
-| 🟠 **High** | Orange | Significant attack surface — CORS wildcard, PII in cookies/JWT, known-bad tokens |
-| 🟡 **Medium** | Yellow | Security weakening — missing headers, version disclosure, CSP misconfig |
-| 🟢 **Low** | Yellow-green | Defence-in-depth gaps — cookie flags, autocomplete, relative CSS imports |
-| 🔵 **Informational** | Blue | Awareness items — charset, phone/JS version disclosure |
+| 🔴 **Critical** | Red | Immediate exploitation risk: credentials, private keys, dangerous methods |
+| 🟠 **High** | Orange | Significant attack surface: CORS wildcard, PII in cookies/JWT, known-bad tokens |
+| 🟡 **Medium** | Yellow | Security weakening: missing headers, version disclosure, CSP misconfig |
+| 🟢 **Low** | Yellow-green | Defence-in-depth gaps: cookie flags, autocomplete, relative CSS imports |
+| 🔵 **Informational** | Blue | Awareness items: charset, phone/JS version disclosure |
 
 ---
 
 ## 🔒 Security Properties of the Extension Itself
 
-- **No active scanning** — reads responses only, sends no requests
-- **No network calls** — zero outbound traffic from the extension
-- **No file writes** — only when you explicitly trigger an export
-- **Secrets redacted in evidence** — matched secret values are partially masked (first 6 chars + `****`) in the UI and exports
-- **ReDoS-hardened regexes** — all quantifiers in secret patterns are bounded; non-greedy alternates used where applicable
-- **CSV formula injection prevention** — dangerous leading characters prefixed before write
-- **JWT payload decoded safely** — `errors="replace"` on UTF-8 decode, wrapped in `try/except`
+- **No active scanning:** reads responses only, sends no requests
+- **No network calls:** zero outbound traffic from the extension
+- **No file writes:** only when you explicitly trigger an export
+- **Secrets redacted in evidence:** matched secret values are partially masked (first 6 chars + `****`) in the UI and exports
+- **ReDoS-hardened regexes:** all quantifiers in secret patterns are bounded; non-greedy alternates used where applicable
+- **CSV formula injection prevention:** dangerous leading characters prefixed before write
+- **JWT payload decoded safely:** `errors="replace"` on UTF-8 decode, wrapped in `try/except`
 
 ---
 
@@ -386,10 +406,10 @@ autovuln.py
 | Component | Requirement |
 |-----------|-------------|
 | Burp Suite | Community or Professional (any recent version) |
-| Jython | 2.7.x — configured in `Extensions → Options → Python Environment` |
+| Jython | 2.7.x, configured in `Extensions → Options → Python Environment` |
 | Java | JDK 8+ (bundled with Burp) |
 | OS | Windows, macOS, Linux |
-| Dependencies | **None** — single file, stdlib only |
+| Dependencies | **None** (single file, stdlib only) |
 
 ---
 
@@ -424,15 +444,15 @@ README.md          ← This file.
         Click [▶ Send to Repeater] → modify headers → resend → confirm
 
 7.  Export for reporting
-        [Export CSV]  — spreadsheet-ready
-        [Export DOCX] — client-ready Word document
+        [Export CSV]  spreadsheet-ready
+        [Export DOCX] client-ready Word document
 ```
 
 ---
 
 ## 🤝 Contributing
 
-Contributions welcome — new check modules, additional secret patterns, and UI improvements are all fair game.
+Contributions welcome. New check modules, additional secret patterns, and UI improvements are all fair game.
 
 When adding a new check module:
 
@@ -440,7 +460,7 @@ When adding a new check module:
 2. Add it to `dispatch()` 
 3. Each finding needs: `name`, `severity`, `description`, `evidence`, `remediation`, `cwe`
 4. Use `_trunc(s, n)` on any user-controlled value before putting it in `evidence`
-5. Bound all regex quantifiers — no `{n,}` without an upper limit
+5. Bound all regex quantifiers: no `{n,}` without an upper limit
 
 ---
 
